@@ -1,0 +1,39 @@
+type of flow i think it should be:
+
+flow::Instance instance = flow::MakeInstance() <- possibe tunable arguments?
+
+flow::buffer numbersA = instance.getReadOnlyBuffer() <- definantly arguments here one of which is name to be used in glsl
+
+numbersA.setValues(std::vector<int>{1, 1, 1,1, 1,}) <- support bunch of operations
+
+*we do the same for numbersB*
+
+instance.addPipeline() <- SPRV to use + pushconstants? Name!
+
+instance.runSinglePipeline() <- name of the pipeline + array/list/vector of flow::buffers
+
+must be able to set up a sequance of pipeline dispatches, support wavefront kenreling!
+
+on glsl add support for preposses decoration:
+
+@buffer[name="name", access="Read only", type="int", layout="std430"]
+
+where name must match the argument name at creation. 
+
+
+----------------
+
+best support inital setup flexibility. device selection and extentions adding.
+
+keep buffers modular + possibly have support for 2D images even 
+
+safety with unique_PTR, size checks asserts and exceptions
+
+potentially add support for vs code to highlight pipeline / SSBO names when using flow.
+
+potentially add support for common operations.
+
+have async dispach with std::future.
+
+
+
