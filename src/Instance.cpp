@@ -1,4 +1,5 @@
 #include "../include/flowVk/Instance.hpp"
+#include "internal/InstanceImpl.hpp" 
 
 #include <stdexcept>
 #include <iostream>
@@ -16,6 +17,8 @@
 #endif
 
 namespace Flow {
+
+// ----- Helpers -----
 
 static void vkCheck(VkResult result, const char* msg)
 {
@@ -44,44 +47,59 @@ static std::vector<uint32_t> read_spirv_words(const std::filesystem::path& path)
 	return words;
 }
 
-struct Instance::Impl {
-	VkInstance 		 instance = VK_NULL_HANDLE;
-	VkPhysicalDevice physical = VK_NULL_HANDLE;
-	VkDevice 		 device   = VK_NULL_HANDLE;
+static VkBufferUsageFlags ssbo_usage()
+{
+	return VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+}
 
-	uint32_t computeQueueFamily = UINT32_MAX;
-	VkQueue  computeQueue       = VK_NULL_HANDLE;
+static void create_vma_buffer(InstanceImpl* pimpl, VkDeviceSize size, VkBuffer* outBuf, VmaAllocation* outAlloc)
+{
+	VkBufferCreateInfo bufferCreateInfo{};
+	bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	bufferCreateInfo.size = size;
+	bufferCreateInfo.usage = ssbo_usage();
+	bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-	VmaAllocator allocator = VK_NULL_HANDLE;
-	
-	struct KernelState {
-		VkShaderModule shaderModule = VK_NULL_HANDLE;
-		VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-		VkPipeline pipeline = VK_NULL_HANDLE;
-		std::vector<VkDescriptorSetLayout> setLayouts;
-	};
+	VmaAllocationCreateInfo allocationCreateInfo{};
+	allocationCreateInfo.usage = VMA_MEMORY_USAGE_AUTO;
+	allocationCreateInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+	        					 VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
-	std::unordered_map<std::string, KernelState> kernels;
+	VkBuffer buffer = VK_NULL_HANDLE;
+	VmaAllocation alloc = VK_NULL_HANDLE;
+	VkResult r = vmaCreateBuffer(pimpl->allocator, &bufferCreateInfo, &allocationCreateInfo, &buffer, &alloc, nullptr);
+	vkCheck(r, "vmaCreateBuffer");
+	*outBuf = buffer;
+	*outAlloc = alloc;
+}
 
-	~Impl()
-	{
-		for (auto& [name, kernel] : kernels)
-		{
-			for (auto layout : kernel.setLayouts)
-				if (layout)
-					vkDestroyDescriptorSetLayout(device, layout, nullptr);
-			
-			if (kernel.pipeline)		vkDestroyPipeline(device, kernel.pipeline, nullptr);
-			if (kernel.pipelineLayout)	vkDestroyPipelineLayout(device, kernel.pipelineLayout, nullptr);
-			if (kernel.shaderModule)	vkDestroyShaderModule(device, kernel.shaderModule, nullptr);
-		}
-		kernels.clear();
-		
-		if (allocator)	vmaDestroyAllocator(allocator);
-		if (device)		vkDestroyDevice(device, nullptr);
-		if (instance)	vkDestroyInstance(instance, nullptr);
-	}
-};
+static void zero_fill_buffer(InstanceImpl* pimpl, VkBuffer buffer, VkDeviceSize sizeBytes) {
+	pimpl->submit_one_time([&](VkCommandBuffer cmd) {
+		vkCmdFillBuffer(cmd, buffer, 0, sizeBytes, 0);
+
+		VkBufferMemoryBarrier barrier{};
+		barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+		barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.buffer = buffer;
+		barrier.offset = 0;
+		barrier.size = sizeBytes;
+
+		vkCmdPipelineBarrier(
+			cmd,
+			VK_PIPELINE_STAGE_TRANSFER_BIT,
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			0,
+			0, nullptr,
+			1, &barrier,
+			0, nullptr
+		);
+	});
+}
 
 static std::vector<const char*> default_instance_extensions(bool /*validation*/)
 {
@@ -152,9 +170,76 @@ static VkPhysicalDevice pick_physical_device(VkInstance instance, const Instance
 	throw std::runtime_error("FlowVk: No Vulkan device with a compute queue was found");
 }
 
+
+InstanceImpl::~InstanceImpl()
+{
+	for (auto& [name, kernel] : kernels)
+	{
+		for (auto layout : kernel.setLayouts)
+			if (layout)
+				vkDestroyDescriptorSetLayout(device, layout, nullptr);
+		
+		if (kernel.pipeline)		vkDestroyPipeline(device, kernel.pipeline, nullptr);
+		if (kernel.pipelineLayout)	vkDestroyPipelineLayout(device, kernel.pipelineLayout, nullptr);
+		if (kernel.shaderModule)	vkDestroyShaderModule(device, kernel.shaderModule, nullptr);
+	}
+	kernels.clear();
+	
+	for (auto& [n, b] : buffers)
+	{
+		if (b.buffer)
+			vmaDestroyBuffer(allocator, b.buffer, b.allocation);
+	}
+	buffers.clear();
+
+	if (cmdPool)	vkDestroyCommandPool(device, cmdPool, nullptr);
+	if (allocator)	vmaDestroyAllocator(allocator);
+	if (device)		vkDestroyDevice(device, nullptr);
+	if (instance)	vkDestroyInstance(instance, nullptr);
+}
+
+void InstanceImpl::submit_one_time(std::function<void(VkCommandBuffer)> record)
+{
+	VkCommandBufferAllocateInfo allocateInfo{};
+	allocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocateInfo.commandPool = cmdPool;
+	allocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocateInfo.commandBufferCount = 1;
+
+	VkCommandBuffer cmd = VK_NULL_HANDLE;
+	vkCheck(vkAllocateCommandBuffers(device, &allocateInfo, &cmd), "vkAllocateCommandBuffers");
+
+	VkCommandBufferBeginInfo bufferBeginInfo{};
+	bufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	bufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	vkCheck(vkBeginCommandBuffer(cmd, &bufferBeginInfo), "vkBeginCommandBuffer");
+
+	record(cmd);
+
+	vkCheck(vkEndCommandBuffer(cmd), "vkEndCommandBuffer");
+
+	VkSubmitInfo subbmitInfo{};
+	subbmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	subbmitInfo.commandBufferCount = 1;
+	subbmitInfo.pCommandBuffers = &cmd;
+
+	VkFenceCreateInfo fenceCreateInfo{};
+	fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+	VkFence fence = VK_NULL_HANDLE;
+	vkCheck(vkCreateFence(device, &fenceCreateInfo, nullptr, &fence), "vkCreateFence");
+
+	vkCheck(vkQueueSubmit(computeQueue, 1, &subbmitInfo, fence), "vkQueueSubmit");
+	vkCheck(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX), "vkWaitForFences");
+
+	vkDestroyFence(device, fence, nullptr);
+	vkFreeCommandBuffers(device, cmdPool, 1, &cmd);
+}
+
+// ----- Public Api -----
+
 Instance makeInstance(const InstanceConfig& config)
 {
-	auto pimpl = std::make_shared<Instance::Impl>();
+	auto pimpl = std::make_shared<InstanceImpl>();
 
 	// ----- VkInstance -----
 	VkApplicationInfo app{};
@@ -207,6 +292,15 @@ Instance makeInstance(const InstanceConfig& config)
 
 	vkGetDeviceQueue(pimpl->device, pimpl->computeQueueFamily, 0, &pimpl->computeQueue);
 
+
+	// ------ CMD Pool -----
+	VkCommandPoolCreateInfo poolInfo{};
+	poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	poolInfo.queueFamilyIndex = pimpl->computeQueueFamily;
+	poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+
+	vkCheck(vkCreateCommandPool(pimpl->device, &poolInfo, nullptr, &pimpl->cmdPool), "vkCreateCommandPool");
+
 	// ----- VMA allocator -----
 	VmaAllocatorCreateInfo allocatorCreateInfo{};
 	allocatorCreateInfo.vulkanApiVersion = VK_API_VERSION_1_3;
@@ -236,7 +330,7 @@ void Instance::addKernel(const std::string& kernelName, const std::filesystem::p
   );
 #endif
 
-	const auto& mod = FlowVk::shader_meta::registry::get_module(kernelName);
+	const auto& mod = Flow::shader_meta::registry::get_module(kernelName);
 
 	uint32_t maxSet = 0;
 	for (const auto& buffer : mod.buffers)
@@ -269,7 +363,7 @@ void Instance::addKernel(const std::string& kernelName, const std::filesystem::p
 	for (auto& vector : perSet)
 		std::sort(vector.begin(), vector.end(), [](auto& a, auto& c) { return a.binding < c.binding; });
 
-	Instance::Impl::KernelState kernel{};
+	InstanceImpl::KernelState kernel{};
 
 	kernel.setLayouts.resize(setCount, VK_NULL_HANDLE);
 
@@ -318,6 +412,221 @@ void Instance::addKernel(const std::string& kernelName, const std::filesystem::p
 	vkCheck(vkCreateComputePipelines(pimpl->device, VK_NULL_HANDLE, 1, &pipelineCreateInfo, nullptr, &kernel.pipeline), "vkCreateComputePipelines");
 
 	pimpl->kernels.emplace(kernelName, kernel);
+}
+
+void Instance::runSingleKernel(const std::string& kernelName, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ)
+{
+	if (!pimpl)
+		throw std::runtime_error("FlowVk: runSingleKernel called on empty Instance");
+
+	auto kernelItterator = pimpl->kernels.find(kernelName);
+	if (kernelItterator == pimpl->kernels.end())
+		throw std::runtime_error("FlowVk: unknown kernel: " + kernelName);
+
+#ifndef FLOWVK_WITH_KERNEL_REGISTRY
+	throw std::runtime_error(
+		"FlowVk: Kernel registry not available. "
+		"Did you call flowvk_add_kernels(...) for your target?"
+	);
+#endif
+
+	const auto& module = Flow::shader_meta::registry::get_module(kernelName);
+
+	uint32_t maxSet = 0;
+	for (const auto& b : module.buffers)
+		maxSet = std::max(maxSet, b.set);
+	const uint32_t setCount = module.buffers.empty() ? 0u : (maxSet + 1u);
+
+	auto& kernelState = kernelItterator->second;
+	if (kernelState.setLayouts.size() != setCount)
+		throw std::runtime_error("FlowVk: kernel setLayout count mismatch (did metadata change?): " + kernelName);
+
+	uint32_t totalStorageBindings = static_cast<uint32_t>(module.buffers.size());
+
+	VkDescriptorPoolSize poolSize{};
+	poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	poolSize.descriptorCount = totalStorageBindings;
+
+	VkDescriptorPoolCreateInfo poolCreateInfo{};
+	poolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	poolCreateInfo.maxSets = setCount;
+	poolCreateInfo.poolSizeCount = (totalStorageBindings > 0) ? 1u : 0u;
+	poolCreateInfo.pPoolSizes = (totalStorageBindings > 0) ? &poolSize : nullptr;
+
+	VkDescriptorPool descPool = VK_NULL_HANDLE;
+	vkCheck(vkCreateDescriptorPool(pimpl->device, &poolCreateInfo, nullptr, &descPool), "vkCreateDescriptorPool");
+
+	std::vector<VkDescriptorSet> sets(setCount, VK_NULL_HANDLE);
+	if (setCount > 0)
+	{
+		VkDescriptorSetAllocateInfo allocInfo{};
+		allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		allocInfo.descriptorPool = descPool;
+		allocInfo.descriptorSetCount = setCount;
+		allocInfo.pSetLayouts = kernelState.setLayouts.data();	
+		vkCheck(vkAllocateDescriptorSets(pimpl->device, &allocInfo, sets.data()), "vkAllocateDescriptorSets");
+	}
+
+	std::vector<VkDescriptorBufferInfo> bufferInfos;
+	bufferInfos.reserve(module.buffers.size());
+
+	std::vector<VkWriteDescriptorSet> writes;
+	writes.reserve(module.buffers.size());
+
+	for (const auto& buffer : module.buffers)
+	{
+		auto bufferItterator = pimpl->buffers.find(std::string(buffer.name));
+		if (bufferItterator == pimpl->buffers.end())
+		{
+			vkDestroyDescriptorPool(pimpl->device, descPool, nullptr);
+			throw std::runtime_error("FlowVk: missing required buffer '" + std::string(buffer.name) + "' for kernel '" + kernelName + "'");
+		}
+
+    	auto& state = bufferItterator->second;
+    	if (!state.buffer)
+		{
+    	  vkDestroyDescriptorPool(pimpl->device, descPool, nullptr);
+    	  throw std::runtime_error("FlowVk: buffer '" + std::string(buffer.name) + "' not allocated");
+    	}
+
+
+		VkDescriptorBufferInfo bufferInfo{};
+		bufferInfo.buffer = state.buffer;
+		bufferInfo.offset = 0;
+		bufferInfo.range  = VK_WHOLE_SIZE;
+		bufferInfos.push_back(bufferInfo);
+
+		VkWriteDescriptorSet setW{};
+		setW.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		setW.dstSet = sets[buffer.set];
+		setW.dstBinding = buffer.binding;
+		setW.dstArrayElement = 0;
+		setW.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		setW.descriptorCount = 1;
+		setW.pBufferInfo = &bufferInfos.back();
+		writes.push_back(setW);
+	}
+
+	if (!writes.empty())
+		vkUpdateDescriptorSets(pimpl->device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+
+	pimpl->submit_one_time([&](VkCommandBuffer cmd) {
+    	if (!module.buffers.empty())
+		{
+      		std::vector<VkBufferMemoryBarrier> preBarriers;
+      		preBarriers.reserve(module.buffers.size());
+
+      		for (const auto& buffer : module.buffers)
+			{
+        		auto& state = pimpl->buffers.at(std::string(buffer.name));
+        		VkBufferMemoryBarrier memBarrier{};
+        		memBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        		memBarrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+        		memBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        		memBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        		memBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        		memBarrier.buffer = state.buffer;
+        		memBarrier.offset = 0;
+        		memBarrier.size = VK_WHOLE_SIZE;
+        		preBarriers.push_back(memBarrier);
+      		}
+
+    		vkCmdPipelineBarrier(
+				cmd,
+				VK_PIPELINE_STAGE_HOST_BIT,
+				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				0,
+				0, nullptr,
+				static_cast<uint32_t>(preBarriers.size()), preBarriers.data(),
+				0, nullptr
+    		);
+    	}
+
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, kernelState.pipeline);
+
+		if (setCount > 0)
+		{
+			vkCmdBindDescriptorSets(
+				cmd,
+				VK_PIPELINE_BIND_POINT_COMPUTE,
+				kernelState.pipelineLayout,
+				0,
+				setCount,
+				sets.data(),
+				0,
+				nullptr
+			);
+		}
+
+		vkCmdDispatch(cmd, groupCountX, groupCountY, groupCountZ);
+
+    	if (!module.buffers.empty())
+		{
+    		std::vector<VkBufferMemoryBarrier> postBarriers;
+    		postBarriers.reserve(module.buffers.size());
+
+    		for (const auto& buffer : module.buffers) {
+    			auto& state = pimpl->buffers.at(std::string(buffer.name));
+    			VkBufferMemoryBarrier memBarrier{};
+    			memBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    			memBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    			memBarrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    			memBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    			memBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    			memBarrier.buffer = state.buffer;
+    			memBarrier.offset = 0;
+    			memBarrier.size = VK_WHOLE_SIZE;
+    			postBarriers.push_back(memBarrier);
+    		}
+
+			vkCmdPipelineBarrier(
+				cmd,
+				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				VK_PIPELINE_STAGE_HOST_BIT,
+				0,
+				0, nullptr,
+				static_cast<uint32_t>(postBarriers.size()), postBarriers.data(),
+				0, nullptr
+			);
+    	}
+	});
+	vkDestroyDescriptorPool(pimpl->device, descPool, nullptr);
+}
+
+BufferBuilder Instance::makeReadOnly(const std::string& name)
+{
+	if (!pimpl)
+		throw std::runtime_error("FlowVk: makeReadOnly on empty Instance");
+	BufferBuilder buffer;
+	buffer.owner = pimpl;
+	buffer.name = name;
+	buffer.access = BufferAccess::ReadOnly;
+	buffer.zero_initialize = false;
+	return buffer;
+}
+
+BufferBuilder Instance::makeWriteOnly(const std::string& name)
+{
+	if (!pimpl)
+		throw std::runtime_error("FlowVk: makeWriteOnly on empty Instance");
+	BufferBuilder buffer;
+	buffer.owner = pimpl;
+	buffer.name = name;
+	buffer.access = BufferAccess::WriteOnly;
+	buffer.zero_initialize = true;
+	return buffer;
+}
+
+BufferBuilder Instance::makeReadWrite(const std::string& name)
+{
+	if (!pimpl)
+		throw std::runtime_error("FlowVk: makeReadWrite on empty Instance");
+	BufferBuilder buffer;
+	buffer.owner = pimpl;
+	buffer.name = name;
+	buffer.access = BufferAccess::ReadWrite;
+	buffer.zero_initialize = false;
+	return buffer;
 }
 
 } // namespace Flow

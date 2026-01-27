@@ -2,6 +2,8 @@
 
 #include "flowVk/ShaderMeta.hpp"
 #include "flowVk/Instance.hpp"
+#include "flowVk/Buffer.hpp"
+
 
 #if defined(__has_include)
 	#if __has_include("KernelBuffers.hpp")

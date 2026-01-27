@@ -14,6 +14,7 @@ option(FLOWVK_INSTALL "Enable install + package export" ON)
 # ----------------------------
 add_library(FlowVk STATIC
 	src/Instance.cpp
+	src/Buffer.cpp
 )
 add_library(FlowVk::FlowVk ALIAS FlowVk)
 

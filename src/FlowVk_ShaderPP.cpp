@@ -348,17 +348,17 @@ static std::optional<std::string> access_to_glsl_qual(const std::string& s)
 
 static std::string access_to_cpp_enum(const std::string& s)
 {
-	if (s == "read_only" || s == "readonly" || s == "read-only") return "FlowVk::shader_meta::Access::ReadOnly";
-	if (s == "write_only" || s == "writeonly" || s == "write-only") return "FlowVk::shader_meta::Access::WriteOnly";
-	return "FlowVk::shader_meta::Access::ReadWrite";
+	if (s == "read_only" || s == "readonly" || s == "read-only") return "Flow::shader_meta::Access::ReadOnly";
+	if (s == "write_only" || s == "writeonly" || s == "write-only") return "Flow::shader_meta::Access::WriteOnly";
+	return "Flow::shader_meta::Access::ReadWrite";
 }
 
 static std::string layout_to_cpp_enum(const std::string& s)
 {
-	if (s == "std430") return "FlowVk::shader_meta::Layout::Std430";
-	if (s == "std140") return "FlowVk::shader_meta::Layout::Std140";
-	if (s == "scalar") return "FlowVk::shader_meta::Layout::Scalar";
-	return "FlowVk::shader_meta::Layout::Unknown";
+	if (s == "std430") return "Flow::shader_meta::Layout::Std430";
+	if (s == "std140") return "Flow::shader_meta::Layout::Std140";
+	if (s == "scalar") return "Flow::shader_meta::Layout::Scalar";
+	return "Flow::shader_meta::Layout::Unknown";
 }
 
 static bool is_supported_layout(const std::string& s)
@@ -498,12 +498,12 @@ static std::string emit_hpp(const std::filesystem::path& in_file, const std::vec
 	header += "#include <string_view>\n";
 	header += "#include <flowVk/ShaderMeta.hpp>\n\n";
 
-	header += "namespace FlowVk::shader_meta::" + stem + " {\n\n";
+	header += "namespace Flow::shader_meta::" + stem + " {\n\n";
 
-	header += "inline constexpr std::array<FlowVk::shader_meta::BufferBinding, " + std::to_string(buffers.size()) + "> kBufferArray = {{\n";
+	header += "inline constexpr std::array<Flow::shader_meta::BufferBinding, " + std::to_string(buffers.size()) + "> kBufferArray = {{\n";
 	for (const auto& b : buffers)
 	{
-		header += "  FlowVk::shader_meta::BufferBinding{";
+		header += "  Flow::shader_meta::BufferBinding{";
 		header += "\"" + escape_cpp_string(b.name) + "\", ";
 		header += "\"" + escape_cpp_string(b.type) + "\", ";
 		header += access_to_cpp_enum(b.access) + ", ";
@@ -514,12 +514,12 @@ static std::string emit_hpp(const std::filesystem::path& in_file, const std::vec
 	}
 	header += "}};\n\n";
 
-	header += "inline constexpr FlowVk::shader_meta::Module module = {\n";
+	header += "inline constexpr Flow::shader_meta::Module module = {\n";
 	header += "  .kernel_name = \"" + escape_cpp_string(kernel_name) + "\",\n";
-	header += "  .buffers = std::span<const FlowVk::shader_meta::BufferBinding>(kBufferArray),\n";
+	header += "  .buffers = std::span<const Flow::shader_meta::BufferBinding>(kBufferArray),\n";
 	header += "};\n\n";
 
-	header += "} // namespace FlowVk::shader_meta::" + stem + "\n";
+	header += "} // namespace Flow::shader_meta::" + stem + "\n";
 	return header;
 }
 

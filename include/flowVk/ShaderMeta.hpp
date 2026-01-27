@@ -3,7 +3,7 @@
 #include <string_view>
 #include <span>
 
-namespace FlowVk::shader_meta {
+namespace Flow::shader_meta {
 
 enum class Access : uint8_t { ReadOnly, WriteOnly, ReadWrite };
 enum class Layout : uint8_t { Std430, Std140, Scalar, Unknown };
@@ -22,4 +22,4 @@ struct Module {
 	std::span<const BufferBinding> buffers;
 };
 
-} // namespace FlowVk::shader_meta
+} // namespace Flow::shader_meta

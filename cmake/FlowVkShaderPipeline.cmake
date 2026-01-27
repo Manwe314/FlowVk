@@ -132,8 +132,8 @@ function(_flowvk_generate_aggregator OUT_AGG_HPP HPP_DIR SHADERS)
     string(APPEND _content "#include \"${_stem}.bindings.hpp\"\n")
   endforeach()
 
-  string(APPEND _content "\nnamespace FlowVk::shader_meta::registry {\n\n")
-  string(APPEND _content "using FlowVk::shader_meta::Module;\n\n")
+  string(APPEND _content "\nnamespace Flow::shader_meta::registry {\n\n")
+  string(APPEND _content "using Flow::shader_meta::Module;\n\n")
 
   # registry map
   string(APPEND _content "inline const std::unordered_map<std::string_view, const Module*>& map() {\n")
@@ -141,8 +141,8 @@ function(_flowvk_generate_aggregator OUT_AGG_HPP HPP_DIR SHADERS)
 
   foreach(SHADER IN LISTS SHADERS)
     get_filename_component(_stem "${SHADER}" NAME_WE)
-    # module symbol is: FlowVk::shader_meta::<stem>::module
-    string(APPEND _content "    {\"${_stem}\", &FlowVk::shader_meta::${_stem}::module},\n")
+    # module symbol is: Flow::shader_meta::<stem>::module
+    string(APPEND _content "    {\"${_stem}\", &Flow::shader_meta::${_stem}::module},\n")
   endforeach()
 
   string(APPEND _content "  };\n")
@@ -163,7 +163,7 @@ function(_flowvk_generate_aggregator OUT_AGG_HPP HPP_DIR SHADERS)
   string(APPEND _content "  throw std::runtime_error(\"FlowVk: Unknown kernel name\");\n")
   string(APPEND _content "}\n\n")
 
-  string(APPEND _content "} // namespace FlowVk::shader_meta::registry\n")
+  string(APPEND _content "} // namespace Flow::shader_meta::registry\n")
 
   file(GENERATE
     OUTPUT "${_agg}"
