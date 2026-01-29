@@ -3,6 +3,13 @@
     {
       "name": "Linux",
       "compilerPath": "/usr/bin/clang++",
+      "includePath": [
+        "${workspaceFolder}/include",
+        "${workspaceFolder}/include/external"
+      ],
+      "systemIncludePath": [
+        "${workspaceFolder}/include/external"
+      ],
       "cppStandard": "c++23",
       "intelliSenseMode": "linux-clang-x64"
     }

@@ -14,3 +14,8 @@ flow uogrades to do :
 	support custom set of set/binding
 	
 
+issues seen:
+	swaping access types between sequential kernels
+	having smoother developement process / error msgs
+	make it easier to point to .spv
+	uniform variable uploads.

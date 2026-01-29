@@ -5,7 +5,7 @@
 #include <stdexcept>
 #include <cstring>
 #include <vulkan/vulkan.h>
-#include "../include/external/vk_mem_alloc.h"
+#include <vk_mem_alloc.h>
 
 namespace Flow {
 
@@ -39,8 +39,6 @@ BufferAccess Buffer::access() const
 {
 	return get_state_const(*this).access;
 }
-
-
 
 void Buffer::setBytes(const void* data, std::size_t bytes)
 {

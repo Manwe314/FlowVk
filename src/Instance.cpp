@@ -10,7 +10,7 @@
 #include <vulkan/vulkan.h>
 
 #define VMA_IMPLEMENTATION
-#include "../include/external/vk_mem_alloc.h"
+#include <vk_mem_alloc.h>
 
 #ifdef FLOWVK_WITH_KERNEL_REGISTRY
   #include "KernelBuffers.hpp"
@@ -169,7 +169,6 @@ static VkPhysicalDevice pick_physical_device(VkInstance instance, const Instance
 
 	throw std::runtime_error("FlowVk: No Vulkan device with a compute queue was found");
 }
-
 
 InstanceImpl::~InstanceImpl()
 {

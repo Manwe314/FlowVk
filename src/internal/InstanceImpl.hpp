@@ -2,7 +2,7 @@
 
 #include "../../include/flowVk/Instance.hpp"
 #include <vulkan/vulkan.h>
-#include "../../include/external/vk_mem_alloc.h"
+#include <vk_mem_alloc.h>
 
 #include <unordered_map>
 #include <functional>

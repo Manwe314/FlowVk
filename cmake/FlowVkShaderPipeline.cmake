@@ -1,6 +1,5 @@
 include_guard(GLOBAL)
 
-# FlowVk root (repo) relative to this file
 set(_FLOWVK_ROOT "${CMAKE_CURRENT_LIST_DIR}/..")
 
 # -----------------------------------------------------------------------------
@@ -74,12 +73,12 @@ function(_flowvk_add_one_shader OUT_GLSL OUT_HPP OUT_SPV SHADER GLSL_DIR HPP_DIR
   _flowvk_ensure_shaderpp_tool()
   _flowvk_require_glslc()
 
-  get_filename_component(_stem "${SHADER}" NAME_WE)      # multiply
-  get_filename_component(_name "${SHADER}" NAME)         # multiply.comp
+  get_filename_component(_stem "${SHADER}" NAME_WE)
+  get_filename_component(_name "${SHADER}" NAME)   
 
-  set(_glsl "${GLSL_DIR}/${_name}.glsl")                 # multiply.comp.glsl
-  set(_hpp  "${HPP_DIR}/${_stem}.bindings.hpp")          # multiply.bindings.hpp
-  set(_spv  "${SPV_DIR}/${_stem}.spv")                   # multiply.spv
+  set(_glsl "${GLSL_DIR}/${_name}.glsl")           
+  set(_hpp  "${HPP_DIR}/${_stem}.bindings.hpp")    
+  set(_spv  "${SPV_DIR}/${_stem}.spv")             
 
   add_custom_command(
     OUTPUT "${_glsl}" "${_hpp}"
@@ -126,7 +125,6 @@ function(_flowvk_generate_aggregator OUT_AGG_HPP HPP_DIR SHADERS)
   string(APPEND _content "#include <stdexcept>\n")
   string(APPEND _content "#include <flowVk/ShaderMeta.hpp>\n\n")
 
-  # Include per-kernel headers
   foreach(SHADER IN LISTS SHADERS)
     get_filename_component(_stem "${SHADER}" NAME_WE)
     string(APPEND _content "#include \"${_stem}.bindings.hpp\"\n")
@@ -135,13 +133,11 @@ function(_flowvk_generate_aggregator OUT_AGG_HPP HPP_DIR SHADERS)
   string(APPEND _content "\nnamespace Flow::shader_meta::registry {\n\n")
   string(APPEND _content "using Flow::shader_meta::Module;\n\n")
 
-  # registry map
   string(APPEND _content "inline const std::unordered_map<std::string_view, const Module*>& map() {\n")
   string(APPEND _content "  static const std::unordered_map<std::string_view, const Module*> reg = {\n")
 
   foreach(SHADER IN LISTS SHADERS)
     get_filename_component(_stem "${SHADER}" NAME_WE)
-    # module symbol is: Flow::shader_meta::<stem>::module
     string(APPEND _content "    {\"${_stem}\", &Flow::shader_meta::${_stem}::module},\n")
   endforeach()
 
@@ -175,8 +171,6 @@ endfunction()
 
 # -----------------------------------------------------------------------------
 # Public API #3: emit only HPPs (and aggregator)
-# NOTE: this assumes ShaderPP always produces both GLSL+HPP. If you later add
-# true --out-hpp-only support, we can simplify this.
 # -----------------------------------------------------------------------------
 function(flowvk_emit_kernel_hpps)
   set(oneValueArgs TARGET)
@@ -193,7 +187,7 @@ function(flowvk_emit_kernel_hpps)
   _flowvk_validate_unique_stems("${ARG_SHADERS}")
 
   set(_hpp_dir  "${CMAKE_CURRENT_BINARY_DIR}/shaderInclude/$<CONFIG>")
-  set(_glsl_dir "${CMAKE_CURRENT_BINARY_DIR}/shaders/$<CONFIG>") # dummy place
+  set(_glsl_dir "${CMAKE_CURRENT_BINARY_DIR}/shaders/$<CONFIG>")
 
   _flowvk_ensure_shaderpp_tool()
 
@@ -203,7 +197,7 @@ function(flowvk_emit_kernel_hpps)
     get_filename_component(_name "${SHADER}" NAME)
 
     set(_hpp  "${_hpp_dir}/${_stem}.bindings.hpp")
-    set(_glsl "${_glsl_dir}/${_name}.glsl") # generated anyway by current ShaderPP
+    set(_glsl "${_glsl_dir}/${_name}.glsl")
 
     add_custom_command(
       OUTPUT "${_hpp}" "${_glsl}"

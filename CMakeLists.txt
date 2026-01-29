@@ -28,8 +28,7 @@ target_include_directories(FlowVk
 find_package(Vulkan REQUIRED)
 target_link_libraries(FlowVk PUBLIC Vulkan::Vulkan)
 
-# If VMA header is in your repo (e.g. external/vma/vk_mem_alloc.h):
-target_include_directories(FlowVk SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/external/)
+target_include_directories(FlowVk SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include/external)
 
 # ----------------------------
 # Shader pipeline CMake module
@@ -58,7 +57,6 @@ if(FLOWVK_INSTALL)
     EXPORT FlowVkTargets
   )
 
-  # Install the shader pipeline module so consumers get the functions
   install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FlowVkShaderPipeline.cmake"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/FlowVk"
@@ -87,4 +85,3 @@ if(FLOWVK_INSTALL)
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/FlowVk"
   )
 endif()
-
