@@ -1,6 +1,7 @@
 # FlowVk
 
 FlowVk is a minimal Vulkan compute wrapper focused on named storage buffers and simple kernel dispatch.
+![logo](https://github.com/Manwe314/FlowVk/blob/main/images/FlowIcon.png "Flow logo")
 
 ## Table of content
 
